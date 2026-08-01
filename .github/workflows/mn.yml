@@ -4,11 +4,12 @@ on:
   workflow_dispatch:
 
 jobs:
-
   build:
+
     runs-on: ubuntu-22.04
 
     strategy:
+      fail-fast: false
       matrix:
         abi:
           - arm64-v8a
@@ -18,8 +19,9 @@ jobs:
 
     steps:
 
-      - name: Checkout TDLib
+      - name: Checkout empty repo
         uses: actions/checkout@v4
+
 
       - name: Install dependencies
         run: |
@@ -27,6 +29,72 @@ jobs:
           sudo apt install -y \
             git \
             cmake \
+            ninja-build \
+            gperf \
+            unzip \
+            zip \
+            build-essential
+
+
+      - name: Clone TDLib
+        run: |
+          git clone --depth 1 https://github.com/tdlib/td.git
+
+
+      - name: Setup Android NDK
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r26d
+
+
+      - name: Configure TDLib ${{ matrix.abi }}
+        run: |
+
+          mkdir build-${{ matrix.abi }}
+
+          cd build-${{ matrix.abi }}
+
+          cmake ../td \
+          -G Ninja \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake \
+          -DANDROID_ABI=${{ matrix.abi }} \
+          -DANDROID_PLATFORM=android-21 \
+          -DANDROID_STL=c++_shared \
+          -DTD_ENABLE_JNI=ON \
+          -DTD_ENABLE_TDNET=ON \
+          -DCMAKE_INSTALL_PREFIX=$GITHUB_WORKSPACE/output-${{ matrix.abi }}
+
+
+      - name: Compile TDLib
+        run: |
+          cd build-${{ matrix.abi }}
+          ninja -j$(nproc)
+
+
+      - name: Install TDLib
+        run: |
+          cd build-${{ matrix.abi }}
+          ninja install
+
+
+      - name: Prepare Android jniLibs
+        run: |
+
+          mkdir -p release/jniLibs/${{ matrix.abi }}
+
+          cp output-${{ matrix.abi }}/lib/libtdjni.so \
+          release/jniLibs/${{ matrix.abi }}/
+
+          cp output-${{ matrix.abi }}/lib/libtdjson.so \
+          release/jniLibs/${{ matrix.abi }}/
+
+          
+      - name: Upload ${{ matrix.abi }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: tdlib-${{ matrix.abi }}
+          path: release/            cmake \
             ninja-build \
             gperf \
             unzip \
