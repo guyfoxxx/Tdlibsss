@@ -1,0 +1,156 @@
+name: Build TDLib (v7a + v8a) and Android App
+
+# Ø§Ø¬Ø±Ø§: Ù‡Ù… Ø¯Ø³ØªÛŒ (workflow_dispatch) Ùˆ Ù‡Ù… Ø±ÙˆÛŒ Ù‡Ø± push Ø¨Ù‡ main
+on:
+  workflow_dispatch:
+    inputs:
+      td_commit:
+        description: "Commit/Tag Ø§Ø² Ø±ÛŒÙ¾ÙˆÛŒ tdlib/td (Ø®Ø§Ù„ÛŒ = Ø¢Ø®Ø±ÛŒÙ† master)"
+        required: false
+        default: ""
+  push:
+    branches: [ main ]
+
+env:
+  # Ø§ÛŒÙ† Ø¯Ùˆ ØªØ§ Ù…Ø¹Ù…Ø§Ø±ÛŒâ€ŒØ§ÛŒ Ù‡Ø³ØªÙ† Ú©Ù‡ Ø®ÙˆØ§Ø³ØªÛŒ Ù†Ú¯Ù‡ Ø¯Ø§Ø±ÛŒ (7=armeabi-v7a, 8=arm64-v8a)
+  ABIS: "armeabi-v7a arm64-v8a"
+  NDK_VERSION: "25.2.9519653"
+
+jobs:
+  # ---------------------------------------------------------------
+  # JOB 1: Ú©Ø§Ù…Ù¾Ø§ÛŒÙ„ Ø®ÙˆØ¯ TDLib (JNI) Ø¨Ø±Ø§ÛŒ Ø¯Ùˆ Ù…Ø¹Ù…Ø§Ø±ÛŒ Ø¨Ø§ Ø§Ø³Ú©Ø±ÛŒÙ¾Øªâ€ŒÙ‡Ø§ÛŒ Ø±Ø³Ù…ÛŒ
+  #        Ø®ÙˆØ¯ Ù¾Ø±ÙˆÚ˜Ù‡â€ŒÛŒ tdlib/td (example/android)
+  # ---------------------------------------------------------------
+  build-tdlib:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - name: Checkout tdlib/td
+        uses: actions/checkout@v4
+        with:
+          repository: tdlib/td
+          ref: ${{ github.event.inputs.td_commit || 'master' }}
+          path: td
+
+      - name: Free up disk space (SDK/NDK + OpenSSL build Ù†ÛŒØ§Ø² Ø¨Ù‡ ÙØ¶Ø§ÛŒ Ø²ÛŒØ§Ø¯ Ø¯Ø§Ø±Ù†)
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android/sdk/ndk-bundle \
+            /opt/ghc /usr/local/.ghcup "$AGENT_TOOLSDIRECTORY" || true
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential cmake ninja-build gperf php-cli git zip unzip \
+            openjdk-17-jdk-headless
+
+      - name: Cache Android SDK/NDK + OpenSSL build
+        uses: actions/cache@v4
+        with:
+          path: |
+            td/example/android/third_party
+            td/example/android/build-openssl
+            ~/Android/Sdk
+          key: tdlib-android-${{ env.NDK_VERSION }}-${{ hashFiles('td/example/android/*.sh') }}
+
+      - name: check-environment.sh
+        working-directory: td/example/android
+        run: |
+          chmod +x *.sh
+          ./check-environment.sh
+
+      - name: fetch-sdk.sh (Ø¯Ø§Ù†Ù„ÙˆØ¯ Android SDK Ù…Ø­Ù„ÛŒ Ø¨Ø±Ø§ÛŒ Ø¨ÛŒÙ„Ø¯)
+        working-directory: td/example/android
+        run: ./fetch-sdk.sh
+
+      - name: build-openssl.sh (Ú©Ø§Ù…Ù¾Ø§ÛŒÙ„ OpenSSL Ø¨Ø±Ø§ÛŒ Ø§Ù†Ø¯Ø±ÙˆÛŒØ¯)
+        working-directory: td/example/android
+        run: ./build-openssl.sh
+
+      - name: build-tdlib.sh (Ú©Ø§Ù…Ù¾Ø§ÛŒÙ„ Ø®ÙˆØ¯ TDLib Ø¨Ø±Ø§ÛŒ Ù‡Ù…Ù‡â€ŒÛŒ ABI Ù‡Ø§)
+        working-directory: td/example/android
+        run: ./build-tdlib.sh
+
+      # Ø§Ø³Ú©Ø±ÛŒÙ¾Øª Ø¨Ø§Ù„Ø§ Ø¨Ù‡â€ŒØµÙˆØ±Øª Ù¾ÛŒØ´â€ŒÙØ±Ø¶ Ù‡Ø± Û´ Ù…Ø¹Ù…Ø§Ø±ÛŒ (armeabi-v7a, arm64-v8a,
+      # x86, x86_64) Ø±Ùˆ Ù…ÛŒâ€ŒØ³Ø§Ø²Ù‡Ø› Ø§ÛŒÙ†Ø¬Ø§ ÙÙ‚Ø· Ù‡Ù…ÙˆÙ† Ø¯ÙˆØªØ§ÛŒÛŒ Ú©Ù‡ Ù„Ø§Ø²Ù… Ø¯Ø§Ø±ÛŒ
+      # (v7a Ùˆ v8a) Ø±Ùˆ Ù†Ú¯Ù‡ Ù…ÛŒâ€ŒØ¯Ø§Ø±ÛŒÙ… ØªØ§ Ø­Ø¬Ù… Ø¢Ø±ØªÛŒÙÚ©Øª/Ø§Ù¾ Ú©Ù…ØªØ± Ø¨Ø´Ù‡.
+      - name: Keep only armeabi-v7a + arm64-v8a
+        working-directory: td/example/android/tdlib
+        run: |
+          echo "ABI Ù‡Ø§ÛŒ Ø³Ø§Ø®ØªÙ‡â€ŒØ´Ø¯Ù‡:"; ls libs
+          for abi in $ABIS; do
+            [ -d "libs/$abi" ] || { echo "!! $abi Ø³Ø§Ø®ØªÙ‡ Ù†Ø´Ø¯"; exit 1; }
+          done
+          find libs -mindepth 1 -maxdepth 1 -type d | while read -r d; do
+            abi=$(basename "$d")
+            echo "$ABIS" | grep -qw "$abi" || rm -rf "$d"
+          done
+          ls -R libs
+
+      - name: Upload tdlib artifact (libs + java glue classes)
+        uses: actions/upload-artifact@v4
+        with:
+          name: tdlib-android-libs
+          path: |
+            td/example/android/tdlib/libs
+            td/example/android/tdlib/java
+          retention-days: 14
+
+  # ---------------------------------------------------------------
+  # JOB 2: Ø±ÛŒØ®ØªÙ† .so Ù‡Ø§ÛŒ Ø³Ø§Ø®ØªÙ‡â€ŒØ´Ø¯Ù‡ ØªÙˆ Ù¾Ø±ÙˆÚ˜Ù‡â€ŒÛŒ CigarettePriceFinder
+  #        Ùˆ Ú¯Ø±ÙØªÙ† Ø¨ÛŒÙ„Ø¯ Ø§Ù†Ø¯Ø±ÙˆÛŒØ¯ (APK)
+  # ---------------------------------------------------------------
+  build-app:
+    needs: build-tdlib
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout app repo
+        uses: actions/checkout@v4
+
+      - name: Download tdlib artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tdlib-android-libs
+          path: tdlib-out
+
+      - name: Place .so files into jniLibs
+        run: |
+          for abi in $ABIS; do
+            mkdir -p app/src/main/jniLibs/$abi
+            cp -v tdlib-out/libs/$abi/*.so app/src/main/jniLibs/$abi/
+          done
+          find app/src/main/jniLibs -type f
+
+      # Ú©Ù„Ø§Ø³â€ŒÙ‡Ø§ÛŒ Ø¬Ø§ÙˆØ§ÛŒ Client / TdApi Ú©Ù‡ TDLib ØªÙˆÙ„ÛŒØ¯ Ù…ÛŒâ€ŒÚ©Ù†Ù‡ Ø±Ùˆ Ú©Ù†Ø§Ø±
+      # Ú©Ø¯Ù‡Ø§ÛŒ Ù¾Ø±ÙˆÚ˜Ù‡ Ù…ÛŒâ€ŒØ°Ø§Ø±ÛŒÙ… (Ù¾Ú©ÛŒØ¬ org.drinkless...). Ø§Ú¯Ø± ØªØ±Ø¬ÛŒØ­ Ù…ÛŒâ€ŒØ¯ÛŒ
+      # Ø¨Ù‡â€ŒØµÙˆØ±Øª jar Ø¬Ø¯Ø§ Ø²ÛŒØ± app/libs Ø¨Ø§Ø´Ù‡ØŒ Ø§ÛŒÙ† Ø§Ø³ØªÙ¾ Ø±Ùˆ Ø¹ÙˆØ¶ Ú©Ù†.
+      - name: Copy generated TDLib Java sources
+        run: |
+          mkdir -p app/src/main/java
+          cp -rv tdlib-out/java/org app/src/main/java/ || true
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          # AGP 3.5.3 / Gradle 6.1.1 Ú©Ù‡ ØªÙˆ Ù¾Ø±ÙˆÚ˜Ù‡â€ŒØ³Øª Ø¨Ø§ JDK 8 Ø³Ø§Ø²Ú¯Ø§Ø±ØªØ±Ù€Ù‡
+          java-version: "8"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Generate Gradle wrapper jar
+        run: |
+          # Ù¾Ø±ÙˆÚ˜Ù‡ ÙØ¹Ù„Ø§Ù‹ gradle-wrapper.jar Ù†Ø¯Ø§Ø±Ù‡ (Ø·Ø¨Ù‚ README Ø®ÙˆØ¯Ù Ù¾Ø±ÙˆÚ˜Ù‡)ØŒ
+          # Ù¾Ø³ Ø¨Ø§ ÛŒÚ© Gradle Ù†ØµØ¨â€ŒØ´Ø¯Ù‡ Ø±ÙˆÛŒ Ø±Ø§Ù†Ø±ØŒ wrapper Ø±Ùˆ Ù…ÛŒâ€ŒØ³Ø§Ø²ÛŒÙ….
+          gradle wrapper --gradle-version 6.1.1
+          chmod +x gradlew
+
+      - name: Build debug APK
+        run: ./gradlew assembleDebug --stacktrace
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: CigarettePriceFinder-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
