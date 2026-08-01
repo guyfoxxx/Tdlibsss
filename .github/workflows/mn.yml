@@ -1,0 +1,81 @@
+name: Build TDLib Android Multi ABI
+
+on:
+  workflow_dispatch:
+
+jobs:
+
+  build:
+    runs-on: ubuntu-22.04
+
+    strategy:
+      matrix:
+        abi:
+          - arm64-v8a
+          - armeabi-v7a
+          - x86
+          - x86_64
+
+    steps:
+
+      - name: Checkout TDLib
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            git \
+            cmake \
+            ninja-build \
+            gperf \
+            unzip \
+            zip \
+            build-essential
+
+      - name: Setup Android NDK
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r26d
+
+      - name: Configure ${{ matrix.abi }}
+        run: |
+          mkdir build
+          cd build
+
+          cmake .. \
+          -G Ninja \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake \
+          -DANDROID_ABI=${{ matrix.abi }} \
+          -DANDROID_PLATFORM=android-21 \
+          -DANDROID_STL=c++_shared \
+          -DTD_ENABLE_JNI=ON \
+          -DTD_ENABLE_TDNET=ON \
+          -DCMAKE_INSTALL_PREFIX=$GITHUB_WORKSPACE/output
+
+      - name: Build TDLib
+        run: |
+          cd build
+          ninja -j$(nproc)
+
+      - name: Install
+        run: |
+          cd build
+          ninja install
+
+      - name: Prepare jniLibs
+        run: |
+          mkdir -p release/jniLibs/${{ matrix.abi }}
+
+          cp output/lib/libtdjni.so \
+          release/jniLibs/${{ matrix.abi }}/
+
+          cp output/lib/libtdjson.so \
+          release/jniLibs/${{ matrix.abi }}/
+
+      - name: Upload ${{ matrix.abi }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: tdlib-${{ matrix.abi }}
+          path: release/
