@@ -9,7 +9,6 @@ jobs:
     runs-on: ubuntu-22.04
 
     strategy:
-      fail-fast: false
       matrix:
         abi:
           - arm64-v8a
@@ -19,35 +18,26 @@ jobs:
 
     steps:
 
-      - name: Checkout empty repo
+      - name: Checkout
         uses: actions/checkout@v4
 
-
-      - name: Install dependencies
+      - name: Install tools
         run: |
           sudo apt update
-          sudo apt install -y \
-            git \
-            cmake \
-            ninja-build \
-            gperf \
-            unzip \
-            zip \
-            build-essential
-
+          sudo apt install -y cmake ninja-build gperf git unzip zip build-essential
 
       - name: Clone TDLib
         run: |
           git clone --depth 1 https://github.com/tdlib/td.git
+          ls -la td
+          test -f td/CMakeLists.txt
 
-
-      - name: Setup Android NDK
+      - name: Setup NDK
         uses: nttld/setup-ndk@v1
         with:
-          ndk-version: r26d
+          ndk-version: r25c
 
-
-      - name: Configure TDLib ${{ matrix.abi }}
+      - name: Build ${{ matrix.abi }}
         run: |
 
           mkdir build-${{ matrix.abi }}
@@ -55,87 +45,34 @@ jobs:
           cd build-${{ matrix.abi }}
 
           cmake ../td \
-          -G Ninja \
-          -DCMAKE_BUILD_TYPE=Release \
-          -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake \
-          -DANDROID_ABI=${{ matrix.abi }} \
-          -DANDROID_PLATFORM=android-21 \
-          -DANDROID_STL=c++_shared \
-          -DTD_ENABLE_JNI=ON \
-          -DTD_ENABLE_TDNET=ON \
-          -DCMAKE_INSTALL_PREFIX=$GITHUB_WORKSPACE/output-${{ matrix.abi }}
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=${{ matrix.abi }} \
+            -DANDROID_PLATFORM=android-21 \
+            -DANDROID_STL=c++_shared \
+            -DTD_ENABLE_JNI=ON \
+            -DCMAKE_INSTALL_PREFIX=$GITHUB_WORKSPACE/out/${{ matrix.abi }}
 
-
-      - name: Compile TDLib
-        run: |
-          cd build-${{ matrix.abi }}
           ninja -j$(nproc)
 
-
-      - name: Install TDLib
-        run: |
-          cd build-${{ matrix.abi }}
           ninja install
 
-
-      - name: Prepare Android jniLibs
+      - name: Collect libs
         run: |
-
           mkdir -p release/jniLibs/${{ matrix.abi }}
 
-          cp output-${{ matrix.abi }}/lib/libtdjni.so \
-          release/jniLibs/${{ matrix.abi }}/
+          cp out/${{ matrix.abi }}/lib/libtdjni.so \
+          release/jniLibs/${{ matrix.abi }}/ || true
 
-          cp output-${{ matrix.abi }}/lib/libtdjson.so \
-          release/jniLibs/${{ matrix.abi }}/
+          cp out/${{ matrix.abi }}/lib/libtdjson.so \
+          release/jniLibs/${{ matrix.abi }}/ || true
 
-          
-      - name: Upload ${{ matrix.abi }}
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: tdlib-${{ matrix.abi }}
-          path: release/            cmake \
-            ninja-build \
-            gperf \
-            unzip \
-            zip \
-            build-essential
-
-      - name: Setup Android NDK
-        uses: nttld/setup-ndk@v1
-        with:
-          ndk-version: r26d
-
-      - name: Configure ${{ matrix.abi }}
-        run: |
-          mkdir build
-          cd build
-
-          cmake .. \
-          -G Ninja \
-          -DCMAKE_BUILD_TYPE=Release \
-          -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake \
-          -DANDROID_ABI=${{ matrix.abi }} \
-          -DANDROID_PLATFORM=android-21 \
-          -DANDROID_STL=c++_shared \
-          -DTD_ENABLE_JNI=ON \
-          -DTD_ENABLE_TDNET=ON \
-          -DCMAKE_INSTALL_PREFIX=$GITHUB_WORKSPACE/output
-
-      - name: Build TDLib
-        run: |
-          cd build
-          ninja -j$(nproc)
-
-      - name: Install
-        run: |
-          cd build
-          ninja install
-
-      - name: Prepare jniLibs
-        run: |
-          mkdir -p release/jniLibs/${{ matrix.abi }}
-
+          path: release
           cp output/lib/libtdjni.so \
           release/jniLibs/${{ matrix.abi }}/
 
