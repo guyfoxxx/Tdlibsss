@@ -1,0 +1,75 @@
+name: Build TDLib Android Multi ABI
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+
+    runs-on: ubuntu-22.04
+
+    strategy:
+      matrix:
+        abi:
+          - arm64-v8a
+          - armeabi-v7a
+          - x86
+          - x86_64
+
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          sudo apt update
+          sudo apt install -y cmake ninja-build gperf git unzip zip build-essential
+
+      - name: Clone TDLib
+        run: |
+          git clone --depth 1 https://github.com/tdlib/td.git
+          ls -la td
+          test -f td/CMakeLists.txt
+
+      - name: Setup NDK
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r25c
+
+      - name: Build ${{ matrix.abi }}
+        run: |
+
+          mkdir build-${{ matrix.abi }}
+
+          cd build-${{ matrix.abi }}
+
+          cmake ../td \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=${{ matrix.abi }} \
+            -DANDROID_PLATFORM=android-21 \
+            -DANDROID_STL=c++_shared \
+            -DTD_ENABLE_JNI=ON \
+            -DCMAKE_INSTALL_PREFIX=$GITHUB_WORKSPACE/out/${{ matrix.abi }}
+
+          ninja -j$(nproc)
+
+          ninja install
+
+      - name: Collect libs
+        run: |
+          mkdir -p release/jniLibs/${{ matrix.abi }}
+
+          cp out/${{ matrix.abi }}/lib/libtdjni.so \
+          release/jniLibs/${{ matrix.abi }}/ || true
+
+          cp out/${{ matrix.abi }}/lib/libtdjson.so \
+          release/jniLibs/${{ matrix.abi }}/ || true
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: tdlib-${{ matrix.abi }}
+          path: release
