@@ -37,7 +37,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential cmake ninja-build gperf php-cli git zip unzip \
-            openjdk-17-jdk-headless
+            openjdk-17-jdk-headless patchelf
 
       - name: Cache Android SDK/NDK + OpenSSL build
         uses: actions/cache@v4
@@ -78,6 +78,25 @@ jobs:
             echo "$ABIS" | grep -qw "$abi" || rm -rf "$d"
           done
           ls -R libs
+
+      # نکته مهم: CMake's FindJNI به اشتباه libtdjni.so رو به libjvm.so/libjawt.so
+      # (کتابخانه‌های دسکتاپ JDK) وابسته می‌کنه، در حالی که اندروید اصلاً همچین
+      # فایلی نداره و لازمش هم نداره (JNIEnv در زمان اجرا توسط خودِ ART داده میشه).
+      # بدون این پاکسازی، لود کردن .so رو گوشی با خطای
+      # "dlopen failed: library libjvm.so not found" شکست می‌خوره.
+      - name: Strip bogus libjvm.so / libjawt.so NEEDED entries
+        working-directory: td/example/android/tdlib/libs
+        run: |
+          for abi in $ABIS; do
+            so="$abi/libtdjni.so"
+            [ -f "$so" ] || { echo "!! $so پیدا نشد"; exit 1; }
+            echo "=== قبل از پاکسازی ($so) ==="
+            readelf -d "$so" | grep NEEDED
+            patchelf --remove-needed libjvm.so "$so" 2>/dev/null || true
+            patchelf --remove-needed libjawt.so "$so" 2>/dev/null || true
+            echo "=== بعد از پاکسازی ($so) ==="
+            readelf -d "$so" | grep NEEDED
+          done
 
       # بسته‌بندی خروجی به یک ساختار آماده که مستقیم می‌تونی
       # کپی/پیست کنی تو پروژه‌ی اندرویدی روی گوشی (مثلاً با AIDE):
